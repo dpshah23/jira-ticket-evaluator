@@ -4,6 +4,7 @@ from django.conf import settings
 from github import Github
 import ollama
 from base64 import b64decode
+import json
 
 class JiraClient:
     def __init__(self):
@@ -109,6 +110,13 @@ class Evaluator:
             ])
             return response['message']['content']
         except Exception as e:
+            error_msg = str(e)
+            if "CUDA" in error_msg or "terminated" in error_msg:
+                return json.dumps({
+                    "verdict": "Fail",
+                    "reasoning": f"LLM Error: The Ollama runner failed (likely GPU/CUDA issue). Please ensure Ollama is running correctly. Technical detail: {error_msg}",
+                    "evidence": []
+                })
             return str(e)
 
     def _format_files(self, files):
