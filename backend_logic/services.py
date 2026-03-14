@@ -12,7 +12,13 @@ from asgiref.sync import async_to_sync
 # MCP and Agent imports
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
-from langchain_mcp_adapters.tools import load_mcp_tools
+# Corrected langchain_mcp_adapters import
+try:
+    from langchain_mcp_adapters.tools import load_mcp_tools
+except ImportError:
+    # Handle potentially different version or missing package
+    load_mcp_tools = None
+
 from langgraph.prebuilt import create_react_agent
 from langchain_core.tools import tool
 
@@ -75,97 +81,89 @@ class GitHubClient:
             'diff_url': pr.diff_url
         }
 
-@tool
-def get_jira_ticket_tool(ticket_id: str) -> str:
-    """Fetch a Jira ticket by ID to read its summary and description."""
-    client = JiraClient()
-    return json.dumps(client.get_ticket(ticket_id))
-
 class Evaluator:
     def __init__(self):
-        # Allow falling back to another provider via settings (or environment variable directly if not in settings)
-        provider = os.getenv("LLM_PROVIDER", "ollama")
-        if provider == "openai":
-            from langchain_openai import ChatOpenAI
-            # Expecting OPENAI_API_KEY to be set
-            self.llm = ChatOpenAI(model="gpt-4o", temperature=0)
-        elif provider == "gemini":
-            from langchain_google_genai import ChatGoogleGenerativeAI
-            # Expecting GOOGLE_API_KEY to be set
-            self.llm = ChatGoogleGenerativeAI(model="gemini-1.5-pro", temperature=0)
-        else:
-            from langchain_ollama import ChatOllama
-            self.llm = ChatOllama(model=settings.OLLAMA_MODEL, base_url=settings.OLLAMA_BASE_URL, temperature=0.1)
-
-    async def async_evaluate(self, ticket, pr, github_repo, github_pr_number):
-        github_token = settings.GITHUB_TOKEN
-        # Ensure we find npx on Windows
-        npx_cmd = "npx.cmd" if os.name == "nt" else "npx"
-        server_parameters = StdioServerParameters(
-            command=npx_cmd,
-            args=["-y", "@modelcontextprotocol/server-github"],
-            env={**os.environ, "GITHUB_PERSONAL_ACCESS_TOKEN": github_token}
-        )
-
-        async with stdio_client(server_parameters) as (read, write):
-            async with ClientSession(read, write) as session:
-                await session.initialize()
-                # Load MCP tools provided by the Github MCP server
-                github_tools = await load_mcp_tools(session)
-                
-                # Combine MCP tools with custom Jira tool
-                tools = github_tools + [get_jira_ticket_tool]
-
-                # Create the agent using LangGraph
-                agent = create_react_agent(self.llm, tools)
-
-                prompt = f"""
-                You are an expert AI software engineer. Your task is to evaluate a GitHub PR against its corresponding Jira ticket.
-                Follow these exact steps:
-                1. You may use the Jira tool to fetch more contexts if needed about ticket ID: {ticket['id']}.
-                   Ticket Summary: {ticket['summary']}
-                   Ticket Description: {ticket['description']}
-                2. IMPORTANT: Use the github tools to fetch files changed in PR #{github_pr_number} in repo {github_repo}. 
-                   Read the code modifications carefully.
-                   Here is the title and description of the PR as context: {pr['title']} - {pr['body']}
-                3. Evaluate whether the PR fulfills each requirement stated in the ticket description.
-                4. Produce a final structured JSON output EXACTLY matching this schema:
-                {{
-                    "verdict": "Pass" | "Partial" | "Fail",
-                    "reasoning": "Detailed explanation...",
-                    "evidence": [
-                        {{
-                            "file": "filename",
-                            "comment": "how it relates"
-                        }}
-                    ]
-                }}
-                Do not output any introductory or conversational text, ONLY raw JSON in the final answer.
-                """
-                
-                response = await agent.ainvoke({"messages": [("user", prompt)]})
-                return response["messages"][-1].content
+        self.model = settings.OLLAMA_MODEL
+        self.client = ollama.Client(host=settings.OLLAMA_BASE_URL)
 
     def evaluate(self, ticket, pr, github_repo, github_pr_number):
+        """Simple and reliable evaluation using direct Ollama client."""
         try:
-            return async_to_sync(self.async_evaluate)(ticket, pr, github_repo, github_pr_number)
-        except Exception as e:
-            error_msg = str(e)
-            tb_str = traceback.format_exc()
-            print(tb_str)
-            
-            # Surface specific ollama errors clearly for the UI, looking at the full traceback
-            if "model 'llama3' not found" in tb_str or '404' in tb_str:
-                error_msg = "Model 'llama3' not found in your local Ollama instance. Please open a command prompt and run 'ollama pull llama3', or switch to Gemini in your .env file."
-            elif "ConnectionRefusedError" in tb_str or "ConnectError" in tb_str:
-                error_msg = "Could not connect to Ollama on localhost:11434. Please ensure Ollama is installed and running."
-            elif "TaskGroup" in error_msg:
-                # Fallback if other errors show up
-                error_msg = "Internal Error: Please check terminal console for details. (Make sure you configure an LLM_PROVIDER in .env)"
+            # Check if model exists
+            try:
+                models = self.client.list()
+                model_list = models.get('models', [])
+                # Handle cases where m is a dict with 'name' (older) or 'model' (newer)
+                model_names = []
+                for m in model_list:
+                    if isinstance(m, dict):
+                        model_names.append(m.get('name', m.get('model', '')))
+                    else:
+                        model_names.append(getattr(m, 'model', getattr(m, 'name', '')))
 
+                if self.model not in model_names and f"{self.model}:latest" not in model_names:
+                    return json.dumps({
+                        "verdict": "Fail",
+                        "reasoning": f"Model '{self.model}' not found in Ollama. Available: {', '.join(model_names[:5])}. Please run 'ollama pull {self.model}'.",
+                        "evidence": []
+                    })
+            except Exception as e:
+                print(f"Ollama list check failed: {e}")
+                # Continue anyway, let the chat call fail if it must
+
+            prompt = f"""
+            Analyze if the following GitHub Pull Request satisfies the Jira Ticket requirements.
+
+            JIRA TICKET:
+            ID: {ticket['id']}
+            Summary: {ticket['summary']}
+            Description: {ticket['description']}
+
+            GITHUB PR:
+            Repo: {github_repo}
+            PR #: {github_pr_number}
+            Title: {pr['title']}
+            Body: {pr['body']}
+            
+            FILES CHANGED:
+            {self._format_files(pr['files'])}
+
+            Output format (JSON ONLY):
+            {{
+                "verdict": "Pass" | "Partial" | "Fail",
+                "reasoning": "Detailed breakdown of what matched and what did not.",
+                "evidence": [
+                    {{ "file": "path/to/file", "comment": "description of change found" }}
+                ]
+            }}
+            """
+            
+            print(f"DEBUG: Using model {self.model}")
+            response = self.client.chat(model=self.model, messages=[
+                {'role': 'system', 'content': 'You are a senior code reviewer. Respond ONLY with valid JSON.'},
+                {'role': 'user', 'content': prompt}
+            ])
+            
+            content = response['message']['content']
+            print(f"DEBUG: Ollama response: {content[:100]}...")
+            return content
+
+        except Exception as e:
+            error_data = traceback.format_exc()
+            print(error_data)
             return json.dumps({
                 "verdict": "Fail",
-                "reasoning": f"Agent or MCP Exception: {error_msg}",
+                "reasoning": f"System Error: {str(e)}. Check if Ollama is running at {settings.OLLAMA_BASE_URL}",
                 "evidence": []
             })
+
+    def _format_files(self, files):
+        formatted = ""
+        for f in files:
+            # Truncate large patches to avoid context overflow
+            patch = f['patch'] if f.get('patch') else "No patch data"
+            if len(patch) > 2000:
+                patch = patch[:2000] + "... (truncated)"
+            formatted += f"File: {f['filename']}\nStatus: {f['status']}\nDiff:\n{patch}\n\n"
+        return formatted
 
