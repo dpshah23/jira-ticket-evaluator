@@ -12,7 +12,7 @@ from asgiref.sync import async_to_sync
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from langchain_mcp_adapters.tools import load_mcp_tools
-from langchain.agents import initialize_agent, AgentType
+from langgraph.prebuilt import create_react_agent
 from langchain_core.tools import tool
 
 class JiraClient:
@@ -115,14 +115,8 @@ class Evaluator:
                 # Combine MCP tools with custom Jira tool
                 tools = github_tools + [get_jira_ticket_tool]
 
-                # Create the agent
-                agent = initialize_agent(
-                    tools, 
-                    self.llm, 
-                    agent=AgentType.STRUCTURED_CHAT_ZERO_SHOT_REACT_DESCRIPTION, 
-                    verbose=True,
-                    handle_parsing_errors=True
-                )
+                # Create the agent using LangGraph
+                agent = create_react_agent(self.llm, tools)
 
                 prompt = f"""
                 You are an expert AI software engineer. Your task is to evaluate a GitHub PR against its corresponding Jira ticket.
@@ -148,8 +142,11 @@ class Evaluator:
                 Do not output any introductory or conversational text, ONLY raw JSON in the final answer.
                 """
                 
-                response = agent.run(prompt)
-                return response
+                response = await agent.ainvoke({"messages": [("user", prompt)]})
+                
+                # The response will contain the conversation in the 'messages' key.
+                # The last message is typically the AIMessage with the final answer.
+                return response["messages"][-1].content
 
     def evaluate(self, ticket, pr, github_repo, github_pr_number):
         try:

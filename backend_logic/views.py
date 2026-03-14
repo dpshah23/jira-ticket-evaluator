@@ -1,6 +1,8 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
+from django.shortcuts import render
+from django.views import View
 from .services import JiraClient, GitHubClient, Evaluator
 import json
 
@@ -49,4 +51,8 @@ class TicketEvaluatorView(APIView):
             },
             'evaluation': parsed_evaluation
         })
+
+class FrontendView(View):
+    def get(self, request):
+        return render(request, 'backend_logic/index.html')
 
