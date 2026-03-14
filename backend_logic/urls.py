@@ -1,4 +1,8 @@
 from django.urls import path
+from .views import TicketEvaluatorView
 
-from . import views
+urlpatterns = [
+    path('evaluate/', TicketEvaluatorView.as_view(), name='evaluate-ticket'),
+]
+
 
