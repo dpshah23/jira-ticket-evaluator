@@ -1,0 +1,78 @@
+  + Exception Group Traceback (most recent call last):
+  |   File "E:\jira_ticket_evaluator\debug_mcp2.py", line 17, in main
+  |     await evaluator.async_evaluate(ticket, pr, 'dpshah23/jira-ticket-evaluator', '1')
+  |   File "E:\jira_ticket_evaluator\backend_logic\services.py", line 110, in async_evaluate
+  |     async with stdio_client(server_parameters) as (read, write):
+  |   File "C:\Program Files\Python312\Lib\contextlib.py", line 231, in __aexit__
+  |     await self.gen.athrow(value)
+  |   File "E:\jira_ticket_evaluator\.venv\Lib\site-packages\mcp\client\stdio\__init__.py", line 182, in stdio_client
+  |     async with (
+  |   File "E:\jira_ticket_evaluator\.venv\Lib\site-packages\anyio\_backends\_asyncio.py", line 783, in __aexit__
+  |     raise BaseExceptionGroup(
+  | ExceptionGroup: unhandled errors in a TaskGroup (1 sub-exception)
+  +-+---------------- 1 ----------------
+    | Exception Group Traceback (most recent call last):
+    |   File "E:\jira_ticket_evaluator\.venv\Lib\site-packages\mcp\client\stdio\__init__.py", line 189, in stdio_client
+    |     yield read_stream, write_stream
+    |   File "E:\jira_ticket_evaluator\backend_logic\services.py", line 111, in async_evaluate
+    |     async with ClientSession(read, write) as session:
+    |   File "E:\jira_ticket_evaluator\.venv\Lib\site-packages\mcp\shared\session.py", line 238, in __aexit__
+    |     return await self._task_group.__aexit__(exc_type, exc_val, exc_tb)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "E:\jira_ticket_evaluator\.venv\Lib\site-packages\anyio\_backends\_asyncio.py", line 783, in __aexit__
+    |     raise BaseExceptionGroup(
+    | ExceptionGroup: unhandled errors in a TaskGroup (1 sub-exception)
+    +-+---------------- 1 ----------------
+      | Traceback (most recent call last):
+      |   File "E:\jira_ticket_evaluator\backend_logic\services.py", line 146, in async_evaluate
+      |     response = await agent.ainvoke({"messages": [("user", prompt)]})
+      |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+      |   File "E:\jira_ticket_evaluator\.venv\Lib\site-packages\langgraph\pregel\main.py", line 3460, in ainvoke
+      |     async for chunk in self.astream(
+      |   File "E:\jira_ticket_evaluator\.venv\Lib\site-packages\langgraph\pregel\main.py", line 3109, in astream
+      |     async for _ in runner.atick(
+      |   File "E:\jira_ticket_evaluator\.venv\Lib\site-packages\langgraph\pregel\_runner.py", line 304, in atick
+      |     await arun_with_retry(
+      |   File "E:\jira_ticket_evaluator\.venv\Lib\site-packages\langgraph\pregel\_retry.py", line 163, in arun_with_retry
+      |     return await task.proc.ainvoke(task.input, config)
+      |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+      |   File "E:\jira_ticket_evaluator\.venv\Lib\site-packages\langgraph\_internal\_runnable.py", line 705, in ainvoke
+      |     input = await asyncio.create_task(
+      |             ^^^^^^^^^^^^^^^^^^^^^^^^^^
+      |   File "E:\jira_ticket_evaluator\.venv\Lib\site-packages\langgraph\_internal\_runnable.py", line 464, in ainvoke
+      |     ret = await asyncio.create_task(coro, context=context)
+      |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+      |   File "E:\jira_ticket_evaluator\.venv\Lib\site-packages\langgraph\prebuilt\chat_agent_executor.py", line 707, in acall_model
+      |     response = cast(AIMessage, await static_model.ainvoke(model_input, config))  # type: ignore[union-attr]
+      |                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+      |   File "E:\jira_ticket_evaluator\.venv\Lib\site-packages\langchain_core\runnables\base.py", line 3197, in ainvoke
+      |     input_ = await coro_with_context(part(), context, create_task=True)
+      |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+      |   File "E:\jira_ticket_evaluator\.venv\Lib\site-packages\langchain_core\runnables\base.py", line 5708, in ainvoke
+      |     return await self.bound.ainvoke(
+      |            ^^^^^^^^^^^^^^^^^^^^^^^^^
+      |   File "E:\jira_ticket_evaluator\.venv\Lib\site-packages\langchain_core\language_models\chat_models.py", line 425, in ainvoke
+      |     llm_result = await self.agenerate_prompt(
+      |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+      |   File "E:\jira_ticket_evaluator\.venv\Lib\site-packages\langchain_core\language_models\chat_models.py", line 1134, in agenerate_prompt
+      |     return await self.agenerate(
+      |            ^^^^^^^^^^^^^^^^^^^^^
+      |   File "E:\jira_ticket_evaluator\.venv\Lib\site-packages\langchain_core\language_models\chat_models.py", line 1092, in agenerate
+      |     raise exceptions[0]
+      |   File "E:\jira_ticket_evaluator\.venv\Lib\site-packages\langchain_core\language_models\chat_models.py", line 1361, in _agenerate_with_cache
+      |     result = await self._agenerate(
+      |              ^^^^^^^^^^^^^^^^^^^^^^
+      |   File "E:\jira_ticket_evaluator\.venv\Lib\site-packages\langchain_ollama\chat_models.py", line 1208, in _agenerate
+      |     final_chunk = await self._achat_stream_with_aggregation(
+      |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+      |   File "E:\jira_ticket_evaluator\.venv\Lib\site-packages\langchain_ollama\chat_models.py", line 991, in _achat_stream_with_aggregation
+      |     async for chunk in self._aiterate_over_stream(messages, stop, **kwargs):
+      |   File "E:\jira_ticket_evaluator\.venv\Lib\site-packages\langchain_ollama\chat_models.py", line 1131, in _aiterate_over_stream
+      |     async for stream_resp in self._acreate_chat_stream(messages, stop, **kwargs):
+      |   File "E:\jira_ticket_evaluator\.venv\Lib\site-packages\langchain_ollama\chat_models.py", line 937, in _acreate_chat_stream
+      |     async for part in await self._async_client.chat(**chat_params):
+      |   File "E:\jira_ticket_evaluator\.venv\Lib\site-packages\ollama\_client.py", line 757, in inner
+      |     raise ResponseError(e.response.text, e.response.status_code) from None
+      | ollama._types.ResponseError: model 'llama3' not found (status code: 404)
+      | During task with name 'agent' and id 'b7485805-0e0c-e17b-fcf1-69b618c3d7ed'
+      +------------------------------------

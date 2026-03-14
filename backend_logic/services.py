@@ -6,6 +6,7 @@ from github import Github
 import ollama
 from base64 import b64decode
 import json
+import traceback
 from asgiref.sync import async_to_sync
 
 # MCP and Agent imports
@@ -93,7 +94,7 @@ class Evaluator:
             # Expecting GOOGLE_API_KEY to be set
             self.llm = ChatGoogleGenerativeAI(model="gemini-1.5-pro", temperature=0)
         else:
-            from langchain_community.chat_models import ChatOllama
+            from langchain_ollama import ChatOllama
             self.llm = ChatOllama(model=settings.OLLAMA_MODEL, base_url=settings.OLLAMA_BASE_URL, temperature=0.1)
 
     async def async_evaluate(self, ticket, pr, github_repo, github_pr_number):
@@ -143,9 +144,6 @@ class Evaluator:
                 """
                 
                 response = await agent.ainvoke({"messages": [("user", prompt)]})
-                
-                # The response will contain the conversation in the 'messages' key.
-                # The last message is typically the AIMessage with the final answer.
                 return response["messages"][-1].content
 
     def evaluate(self, ticket, pr, github_repo, github_pr_number):
@@ -153,6 +151,18 @@ class Evaluator:
             return async_to_sync(self.async_evaluate)(ticket, pr, github_repo, github_pr_number)
         except Exception as e:
             error_msg = str(e)
+            tb_str = traceback.format_exc()
+            print(tb_str)
+            
+            # Surface specific ollama errors clearly for the UI, looking at the full traceback
+            if "model 'llama3' not found" in tb_str or '404' in tb_str:
+                error_msg = "Model 'llama3' not found in your local Ollama instance. Please open a command prompt and run 'ollama pull llama3', or switch to Gemini in your .env file."
+            elif "ConnectionRefusedError" in tb_str or "ConnectError" in tb_str:
+                error_msg = "Could not connect to Ollama on localhost:11434. Please ensure Ollama is installed and running."
+            elif "TaskGroup" in error_msg:
+                # Fallback if other errors show up
+                error_msg = "Internal Error: Please check terminal console for details. (Make sure you configure an LLM_PROVIDER in .env)"
+
             return json.dumps({
                 "verdict": "Fail",
                 "reasoning": f"Agent or MCP Exception: {error_msg}",
