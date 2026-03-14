@@ -1,10 +1,19 @@
 import os
 import requests
+import asyncio
 from django.conf import settings
 from github import Github
 import ollama
 from base64 import b64decode
 import json
+from asgiref.sync import async_to_sync
+
+# MCP and Agent imports
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
+from langchain_mcp_adapters.tools import load_mcp_tools
+from langchain.agents import initialize_agent, AgentType
+from langchain_core.tools import tool
 
 class JiraClient:
     def __init__(self):
@@ -65,62 +74,91 @@ class GitHubClient:
             'diff_url': pr.diff_url
         }
 
+@tool
+def get_jira_ticket_tool(ticket_id: str) -> str:
+    """Fetch a Jira ticket by ID to read its summary and description."""
+    client = JiraClient()
+    return json.dumps(client.get_ticket(ticket_id))
+
 class Evaluator:
     def __init__(self):
-        self.model = settings.OLLAMA_MODEL
+        # Allow falling back to another provider via settings (or environment variable directly if not in settings)
+        provider = os.getenv("LLM_PROVIDER", "ollama")
+        if provider == "openai":
+            from langchain_openai import ChatOpenAI
+            # Expecting OPENAI_API_KEY to be set
+            self.llm = ChatOpenAI(model="gpt-4o", temperature=0)
+        elif provider == "gemini":
+            from langchain_google_genai import ChatGoogleGenerativeAI
+            # Expecting GOOGLE_API_KEY to be set
+            self.llm = ChatGoogleGenerativeAI(model="gemini-1.5-pro", temperature=0)
+        else:
+            from langchain_community.chat_models import ChatOllama
+            self.llm = ChatOllama(model=settings.OLLAMA_MODEL, base_url=settings.OLLAMA_BASE_URL, temperature=0.1)
 
-    def evaluate(self, ticket, pr):
-        prompt = f"""
-        Analyze if the following GitHub Pull Request (PR) satisfies the requirements of the Jira Ticket.
+    async def async_evaluate(self, ticket, pr, github_repo, github_pr_number):
+        github_token = settings.GITHUB_TOKEN
+        # Ensure we find npx on Windows
+        npx_cmd = "npx.cmd" if os.name == "nt" else "npx"
+        server_parameters = StdioServerParameters(
+            command=npx_cmd,
+            args=["-y", "@modelcontextprotocol/server-github"],
+            env={**os.environ, "GITHUB_PERSONAL_ACCESS_TOKEN": github_token}
+        )
 
-        JIRA TICKET:
-        ID: {ticket['id']}
-        Summary: {ticket['summary']}
-        Description: {ticket['description']}
+        async with stdio_client(server_parameters) as (read, write):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                # Load MCP tools provided by the Github MCP server
+                github_tools = await load_mcp_tools(session)
+                
+                # Combine MCP tools with custom Jira tool
+                tools = github_tools + [get_jira_ticket_tool]
 
-        GITHUB PULL REQUEST:
-        Title: {pr['title']}
-        Description: {pr['body']}
-        
-        Files Changed:
-        {self._format_files(pr['files'])}
+                # Create the agent
+                agent = initialize_agent(
+                    tools, 
+                    self.llm, 
+                    agent=AgentType.STRUCTURED_CHAT_ZERO_SHOT_REACT_DESCRIPTION, 
+                    verbose=True,
+                    handle_parsing_errors=True
+                )
 
-        Evaluation Criteria:
-        1. Does the code implementation match the ticket requirements?
-        2. Are there any missing features or unaddressed bugs mentioned in the ticket?
-        3. Is the implementation logic sound based on the description?
-
-        Please provide your response in the following JSON format:
-        {{
-            "verdict": "Pass" | "Partial" | "Fail",
-            "reasoning": "Detailed explanation of the verdict",
-            "evidence": [
+                prompt = f"""
+                You are an expert AI software engineer. Your task is to evaluate a GitHub PR against its corresponding Jira ticket.
+                Follow these exact steps:
+                1. You may use the Jira tool to fetch more contexts if needed about ticket ID: {ticket['id']}.
+                   Ticket Summary: {ticket['summary']}
+                   Ticket Description: {ticket['description']}
+                2. IMPORTANT: Use the github tools to fetch files changed in PR #{github_pr_number} in repo {github_repo}. 
+                   Read the code modifications carefully.
+                   Here is the title and description of the PR as context: {pr['title']} - {pr['body']}
+                3. Evaluate whether the PR fulfills each requirement stated in the ticket description.
+                4. Produce a final structured JSON output EXACTLY matching this schema:
                 {{
-                    "file": "filename",
-                    "comment": "how it relates to the requirement"
+                    "verdict": "Pass" | "Partial" | "Fail",
+                    "reasoning": "Detailed explanation...",
+                    "evidence": [
+                        {{
+                            "file": "filename",
+                            "comment": "how it relates"
+                        }}
+                    ]
                 }}
-            ]
-        }}
-        """
-        
+                Do not output any introductory or conversational text, ONLY raw JSON in the final answer.
+                """
+                
+                response = agent.run(prompt)
+                return response
+
+    def evaluate(self, ticket, pr, github_repo, github_pr_number):
         try:
-            response = ollama.chat(model=self.model, messages=[
-                {'role': 'system', 'content': 'You are an expert senior software engineer and code reviewer.'},
-                {'role': 'user', 'content': prompt}
-            ])
-            return response['message']['content']
+            return async_to_sync(self.async_evaluate)(ticket, pr, github_repo, github_pr_number)
         except Exception as e:
             error_msg = str(e)
-            if "CUDA" in error_msg or "terminated" in error_msg:
-                return json.dumps({
-                    "verdict": "Fail",
-                    "reasoning": f"LLM Error: The Ollama runner failed (likely GPU/CUDA issue). Please ensure Ollama is running correctly. Technical detail: {error_msg}",
-                    "evidence": []
-                })
-            return str(e)
+            return json.dumps({
+                "verdict": "Fail",
+                "reasoning": f"Agent or MCP Exception: {error_msg}",
+                "evidence": []
+            })
 
-    def _format_files(self, files):
-        formatted = ""
-        for f in files:
-            formatted += f"File: {f['filename']}\nStatus: {f['status']}\nPatch:\n{f['patch']}\n\n"
-        return formatted

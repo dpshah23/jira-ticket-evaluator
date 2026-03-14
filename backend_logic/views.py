@@ -26,11 +26,11 @@ class TicketEvaluatorView(APIView):
         except Exception as e:
             return Response({'error': f'GitHub PR could not be fetched: {str(e)}'}, status=status.HTTP_404_NOT_FOUND)
 
-        evaluation_result = evaluator.evaluate(ticket, pr)
+        evaluation_result = evaluator.evaluate(ticket, pr, github_repo, github_pr_number)
         
         # Try to parse the evaluation result as JSON
         try:
-            # Look for JSON block in Ollama's response
+            # Look for JSON block in Ollama'sresponse
             start_index = evaluation_result.find('{')
             end_index = evaluation_result.rfind('}') + 1
             if start_index != -1 and end_index != -1:
