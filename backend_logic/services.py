@@ -139,14 +139,28 @@ class Evaluator:
             """
             
             print(f"DEBUG: Using model {self.model}")
-            response = self.client.chat(model=self.model, messages=[
-                {'role': 'system', 'content': 'You are a senior code reviewer. Respond ONLY with valid JSON.'},
-                {'role': 'user', 'content': prompt}
-            ])
+            # Decrease timeout or use a simpler call if needed
+            response = self.client.chat(
+                model=self.model, 
+                messages=[
+                    {'role': 'system', 'content': 'You are a senior code reviewer. Respond ONLY with valid JSON. Do not include any other text.'},
+                    {'role': 'user', 'content': prompt}
+                ],
+                options={
+                    'temperature': 0.1,
+                    'num_predict': 500, # Limit output length to prevent hangs
+                }
+            )
             
             content = response['message']['content']
+            # Basic cleanup in case model adds markers
+            if "```json" in content:
+                content = content.split("```json")[1].split("```")[0].strip()
+            elif "```" in content:
+                content = content.split("```")[1].split("```")[0].strip()
+                
             print(f"DEBUG: Ollama response: {content[:100]}...")
-            return content
+            return content.strip()
 
         except Exception as e:
             error_data = traceback.format_exc()
